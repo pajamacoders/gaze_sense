@@ -4,17 +4,58 @@ class CoordinateTransformer:
     def __init__(self):
         pass
     
+    def estimate_depth(self, bbox_width:float, face_width_cm:float, focal_length:float)->float:
+        """
+        Estimates depth based on bounding box width, face width (in centimemters), and focal length.
+        
+        Args:
+            bbox_width (float): Width of the bounding box (in pixels).
+            face_width_cm (float): Width of the face in centimemters.
+            focal_length (float): Focal length of the camera (in pixel).
+        
+        Returns:
+            float: Estimated depth (in centimemters).
+        """
+        # Calculate the ratio of face width in pixels to face width in centimemters
+        pixel_to_cm_ratio = face_width_cm[0] / bbox_width
+        
+        # Estimate depth using the formula: depth(cm) = focal_length * pixel_to_cm_ratio
+        estimated_depth_cm = focal_length * pixel_to_cm_ratio
+        
+        return estimated_depth_cm
+        
+    def transform_image_point_2_cam_point(self, pts_img:np.array,  camera:dict)->tuple:
+        """
+        transform point on image coordinate system to camera coordinate system.
+        Args:
+            pts_img(np.ndarray): shape=2, homogineous coordinate point. [x,y]. dtype:float
+            camera(dict): dictionary that contains camera information.
+                        - org_image_width, org_image_height, focal_length_x, focal_length_y
+        Return:
+            tuple: (x,y) in camera coordinate system
+        
+        """
+        cx = camera['org_image_width']/2
+        cy = camera['org_image_height']/2
+        fx = camera['focal_length_x']
+        fy = camera['focal_length_y']
+        px_c = (pts_img[0]-cx)/fx
+        py_c = (pts_img[1]-cy)/fy
+        return px_c, py_c
+        
+        
     def get_rotated_axes_using_given_rotation_matrix(self, axes_pts:np.ndarray,\
         R:np.ndarray)->np.ndarray:
         """
         rotate axes_point using given rotation matrix R.
         return the result.
-        parameters:
-        axes_points(np.ndarray): 3xn(n>=1) matrix. dtype=np.float64. a column correspond to a point.
-        R(np.ndarray): rotation matrix. shape 3x3.dtype=np.float64
         
-        return:
-        np.ndarray: result.
+        Args:
+            axes_points(np.ndarray): 3xn(n>=1) matrix. dtype=np.float64. a column correspond to a point.
+            R(np.ndarray): rotation matrix. shape 3x3.dtype=np.float64
+        
+        Returns:
+            np.ndarray: result.
         """
         rotated_axes_pts=np.dot(R, axes_pts)
         return rotated_axes_pts
@@ -26,13 +67,13 @@ class CoordinateTransformer:
         Receive roll, pitch, yaw as input and return rotation matrix that makes using
         rodrigues.
         
-        parameters:
-        roll(float): roll in degrees
-        pitch(float): pitch in degrees
-        yaw(float): yaw in degrees
+        Args:
+            roll(float): roll in degrees
+            pitch(float): pitch in degrees
+            yaw(float): yaw in degrees
         
-        return:
-        R(np.ndarray): 3x3 ndarray
+        Returns:
+            R(np.ndarray): 3x3 ndarray
         """
         rad_roll = np.deg2rad(roll)
         rad_pitch = np.deg2rad(pitch)
@@ -46,13 +87,13 @@ class CoordinateTransformer:
         this function is for left hand coordinate system
         Receive yaw, pitch, yaw as input and return rotation matrix.
         
-        parameters:
-        yaw(float): roll in degrees
-        pitch(float): pitch in degrees
-        roll(float): yaw in degrees
+        Args:
+            yaw(float): roll in degrees
+            pitch(float): pitch in degrees
+            roll(float): yaw in degrees
         
-        return:
-        R(np.ndarray): 3x3 ndarray
+        Returns:
+            R(np.ndarray): 3x3 ndarray
         """
         rad_roll = np.deg2rad(roll)
         rad_pitch = np.deg2rad(pitch)
@@ -92,13 +133,13 @@ class CoordinateTransformer:
         this function is for right hand coordinate system
         Receive roll, pitch, yaw as input and return rotation matrix.
         
-        parameters:
-        roll(float): roll in degrees
-        pitch(float): pitch in degrees
-        yaw(float): yaw in degrees
-        
-        return:
-        R(np.ndarray): 3x3 ndarray
+        Args:
+            roll(float): roll in degrees
+            pitch(float): pitch in degrees
+            yaw(float): yaw in degrees
+            
+        Return:
+            R(np.ndarray): 3x3 ndarray
         """
         rad_roll = np.deg2rad(roll)
         rad_pitch = np.deg2rad(pitch)
