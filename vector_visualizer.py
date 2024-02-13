@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.stats import multivariate_normal
 import numpy as np
 
 class VectorVisualizer:
@@ -15,7 +16,7 @@ class VectorVisualizer:
         # self.show_figure()
     
     def add_point_to_figure(self, pts):
-        self.ax.scatter(*pts, c='c', marker='o', s=15, cmap='Greens')
+        self.ax.scatter(*pts, facecolors='c', marker='o', s=15)
     
     def add_base_axes_to_figure(self):
         origin = np.array([0,0,0])
@@ -42,6 +43,29 @@ class VectorVisualizer:
         self.ax.text(*(origin+v2), f'y{num}', color='g')
         self.ax.text(*(origin+v3), f'z{num}', color='b')
             
+    def draw_gaze_point_and_uncertainty(self, gaze_pt:np.ndarray, cov:np.ndarray):
+        """
+        Visualize gaze point mean and its uncertainty.
+        Args:
+            gaze_pt(np.ndarray): tracked gaze point, [x,y]
+            cov(np.ndarray): 2x2 covariance matrix of x.
+        """
+        if len(gaze_pt.shape)>1:
+            gaze_pt = gaze_pt.reshape(-1)
+        x,y = gaze_pt
+        x_std = np.sqrt(cov[0,0])
+        y_std = np.sqrt(cov[1,1])
+        x_vals = np.linspace((x-x_std*2), (x+x_std*2), 1000)  # 임의의 범위 설정
+        y_vals = np.linspace((y-y_std*2), (y+y_std*2), 1000)  # 임의의 범위 설정
+        X, Y = np.meshgrid(x_vals, y_vals)
+        rv = multivariate_normal(gaze_pt, cov)
+        Z = rv.pdf(np.column_stack((X.ravel(), Y.ravel())))
+        Z = Z.reshape(X.shape)
+        
+        # Heatmap 시각화
+        self.ax.contourf(X, Y, Z, cmap='coolwarm', levels=20, alpha=0.7)
+        
+        
     def show_figure(self):
         # 축 레이블 설정
         self.ax.set_xlabel('X')

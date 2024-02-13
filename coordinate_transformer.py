@@ -32,7 +32,7 @@ class CoordinateTransformer:
             camera(dict): dictionary that contains camera information.
                         - org_image_width, org_image_height, focal_length_x, focal_length_y
         Return:
-            tuple: (x,y) in camera coordinate system
+            tuple: (x,y,1) in camera coordinate system.
         
         """
         cx = camera['org_image_width']/2
@@ -41,7 +41,7 @@ class CoordinateTransformer:
         fy = camera['focal_length_y']
         px_c = (pts_img[0]-cx)/fx
         py_c = (pts_img[1]-cy)/fy
-        return px_c, py_c
+        return px_c, py_c, 1
         
         
     def get_rotated_axes_using_given_rotation_matrix(self, axes_pts:np.ndarray,\
@@ -78,7 +78,7 @@ class CoordinateTransformer:
         rad_roll = np.deg2rad(roll)
         rad_pitch = np.deg2rad(pitch)
         rad_yaw = np.deg2rad(yaw)
-        R = cv2.Rodrigues(np.array(rad_pitch, rad_yaw, rad_roll))[0].astype(np.float64)
+        R = cv2.Rodrigues(np.array([rad_pitch, rad_yaw, rad_roll]))[0].astype(np.float64)
         return R
     
     def get_rot_mat_in_lhd_coord_system_from_yaw_pitch_roll(self,\

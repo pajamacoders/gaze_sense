@@ -1,7 +1,23 @@
+"""
+In this work based on the output from openvino ead-pose-estimation-adas-0001.
+link: https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/intel/head-pose-estimation-adas-0001
+Required yaw, pitch, roll angles follow below description.
+The estimator outputs yaw pitch and roll angles measured in degrees. Suppose the following coordinate system:
+OX points from face center to camera
+OY points from face center to right
+OZ points from face center to up
+The predicted angles show how the face is rotated according to a rotation matrix:
+Yaw - counterclockwise Pitch - counterclockwise Roll - clockwise
+    [cosY -sinY 0]          [ cosP 0 sinP]       [1    0    0 ]   [cosY*cosP cosY*sinP*sinR-sinY*cosR cosY*sinP*cosR+sinY*sinR]
+    [sinY  cosY 0]    *     [  0   1  0  ]   *   [0  cosR sinR] = [sinY*cosP cosY*cosR-sinY*sinP*sinR sinY*sinP*cosR+cosY*sinR]
+    [  0    0   1]          [-sinP 0 cosP]       [0 -sinR cosR]   [  -sinP          -cosP*sinR                cosP*cosR       ]
+"""
 from typing import Tuple
 import numpy as np
 import cv2
+from tqdm import tqdm
 from coordinate_transformer import CoordinateTransformer
+from gaze_point_tracker import GazePointTracker
 from vector_visualizer import VectorVisualizer
 
 class GazeEstimator:
@@ -20,7 +36,7 @@ class GazeEstimator:
         }
         
         """
-        self.visuzlier = VectorVisualizer()
+        self.visualizer = VectorVisualizer()
         self.image = np.zeros((1080,1920,3), dtype=np.uint8)
         # focal length = sensor size/(2xtan(fov))
         # nutz udh2160 sensor:
@@ -56,11 +72,47 @@ class GazeEstimator:
                                 'adult_F_face_height':[12.88,  0.57],
                                 }
             
+    def estimation_gaze_point(self, head_position:np.ndarray, dir_vector:np.ndarray):
+        """
+        Estimated gaze point coordinate in camera xy plane.
+        Plane equation in 3d space:
+        ax+by+cz+d=0, where (a,b,c) is normal vector. In our case same with (0,0,1) z-axis of camera coordinate frame.
+        Line equeation in 3d space(Given normalized direction vector (A,B,C) and a point on a line)
+        * x = xh + At
+        * y = yh + Bt
+        * z = zh + Ct
+        where (xh,yh,zh) is head position in camera coordinate frame and (A,B,C) is direction vector
+        
+        Because we know z=0.
+        0 = zh + Ct
+        -zh/C = t
+        x = xh + A(-zh/C) 
+        y = yh + B(-zh/C) 
+        
+        Args:
+            head_position(np.ndarray): position of head in camera coordinate frame. [x_cam, y_cam, depth]
+            dir_vector(np.ndarray): gaze direction. It is same with first column vector of camera to face rotation matrix.
+        Returns:
+            np.ndarray: 1x3 array, [x,y,z] which means the estimated gaze point.
+        """
+        if dir_vector[-1]==0: # it cause divide by zero
+            return None
+        xh,yh,zh = head_position
+        A,B,C = dir_vector
+        t = -zh/C
+        x = xh + A*t
+        y = yh + B*t
+        return np.asarray([x,y,0], dtype=np.float32)
+        
+        
+        
+        
     
-    def estimate_gaze_point(self, recog_list:list, camera, display):
+    def estimate_gaze_from_head_pose(self, recog_list:list, camera, display):
         self.image.fill(0)
-        for face in recog_list.get('recog_face', []):#for each person
-            for res in face:
+        for i, face in enumerate(recog_list.get('recog_face', [])):#for each person
+            tracker = GazePointTracker(4,2)
+            for j, res in enumerate(face):
                 all_keys_exist = self.check_if_required_key_exist(res)
                 if not all_keys_exist: # if any of the keys are missing, skip.
                     continue
@@ -72,34 +124,60 @@ class GazeEstimator:
                 lx,ty = cx-w//2, cy-h//2
                 rx,by = cx+w//2, cy+h//2
                 
+                #compute head position in camera coordinate frame
                 face_width_cm, face_height_cm = self.get_faze_size_using_sex_and_age(sex, age)
                 est_depth_cm = self.coord_trans.estimate_depth(w, face_width_cm, camera['focal_length_x'])
-                pts_xy_cam = self.coord_trans.transform_image_point_2_cam_point([cx,cy], camera)
-                # R = self.coord_trans.get_rotation_matrix_from_rodrigues(roll, pitch, -yaw)
-                R = self.coord_trans.get_rot_mat_in_lhd_coord_system_from_yaw_pitch_roll(yaw, pitch, roll)
-                # R=np.linalg.inv(R)
-                axes_points = np.array([
-                    [1, 0, 0],
-                    [0, 1, 0],
-                    [0, 0, 1]
-                    ], dtype=np.float64)
-                new_axes_pts = R@axes_points
-                axis_length = int(0.4*w)
+                head_pos_in_cam = self.coord_trans.transform_image_point_2_cam_point([cx,cy], camera)
+                head_pos_in_cam = np.array(head_pos_in_cam)*est_depth_cm
+
+                # compute rotation matrix from camera coordinate frame to face coordinate frame.
+                # the first column of rotation matrix from camear to face coordinate frame
+                # will be the gaze direction
                 
-                # OY:center to right
-                x1 = cx+int(R[1,1]*axis_length)
-                y1 = cy+int(-R[2,1]*axis_length)
-                cv2.line(self.image, (cx, cy), (x1,y1), (0,0,255),2)
-                # OZ: center to top
-                x1 = cx+int(R[1,2]*axis_length)
-                y1 = cy+int(-R[2,2]*axis_length)
-                cv2.line(self.image, (cx, cy), (x1,y1), (0,255,0),2)
-                # OX: center to camera
-                x1 = cx+int(R[1,0]*axis_length)
-                y1 = cy+int(-R[2,0]*axis_length)
-                cv2.line(self.image, (cx, cy), (x1,y1), (255,0,255),2)
-                cv2.imshow('vector', self.image)
-                cv2.waitKey(0)
+                # R is rotation matrix from idea face coordinate frame to real face coordinate frame.
+                Rb2f = self.coord_trans.get_rot_mat_in_lhd_coord_system_from_yaw_pitch_roll(yaw, pitch, -roll)
+                # Rc2b is camera to ideal face coordinate frame rotation matrix.
+                Rc2b= self.coord_trans.get_rot_mat_in_lhd_coord_system_from_yaw_pitch_roll(-180, 90,90)
+                Rc2f=Rb2f@Rc2b
+                gaze_pt = self.estimation_gaze_point(head_pos_in_cam, Rc2f[:,0])
+                
+                if gaze_pt is None: 
+                    continue
+                
+                if tracker.is_initialized():
+                    tracker.predict()
+                    tracker.update(gaze_pt)
+                else:
+                    tracker.initialize_state(gaze_pt)
+                    tracker.set_initialized()
+                    
+                if 0:# this section is for debugging. It draw head orientation in image.
+                    axis_length = int(0.4*w)
+                    # OY:center to right
+                    x1 = cx+int(Rb2f[1,1]*axis_length)
+                    y1 = cy+int(-Rb2f[2,1]*axis_length)
+                    cv2.line(self.image, (cx, cy), (x1,y1), (0,0,255),2)
+                    # OZ: center to top
+                    x1 = cx+int(Rb2f[1,2]*axis_length)
+                    y1 = cy+int(-Rb2f[2,2]*axis_length)
+                    cv2.line(self.image, (cx, cy), (x1,y1), (0,255,0),2)
+                    # OX: center to camera
+                    x1 = cx+int(Rb2f[1,0]*axis_length)
+                    y1 = cy+int(-Rb2f[2,0]*axis_length)
+                    cv2.line(self.image, (cx, cy), (x1,y1), (255,0,255),2)
+                    cv2.imshow('vector', self.image)
+                    cv2.waitKey(0)
+                    
+            x, P = tracker.get_state_and_covariance()
+            if x is None or P is None:
+                #handle exception
+                print('something_wrong')
+            else:
+                self.visualizer.draw_gaze_point_and_uncertainty(x,P)
+                self.visualizer.add_point_to_figure(np.array([*x.reshape(-1),0]))
+                self.visualizer.add_vector_in_figure(head_pos_in_cam, Rc2f[:,0]*20, Rc2f[:,1]*20, Rc2f[:,2]*20, 'f')
+                self.visualizer.show_figure()
+                # print(P)
                 
     def check_if_required_key_exist(self, res:dict)->bool:
         """
